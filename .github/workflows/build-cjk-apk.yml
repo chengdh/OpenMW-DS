@@ -9,6 +9,8 @@ on:
   push:
     branches: [ chinese-gbk-support ]
     paths-ignore:
+      - '**/*.md'
+      - .github/workflows/build-cjk-apk.yml
       - .github/workflows/hybrid-apk.yml
   workflow_dispatch:
 
