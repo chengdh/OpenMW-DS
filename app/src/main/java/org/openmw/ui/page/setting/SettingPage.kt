@@ -1113,7 +1113,12 @@ fun AutoMouseModeOptionSelector() {
 @Composable
 fun CharsetDropdownMenu(updateCharset: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    val charsets = listOf("utf-8", "utf-16", "us-ascii", "iso-8859-1", "shift_jis", "euc-jp", "win1250", "win1251", "windows-1252", "gbk")
+    // Only names accepted by ToUTF8::calculateEncoding() belong here. The
+    // previous list mixed in Java charset names (utf-8, shift_jis, ...) that
+    // the engine rejects with "Unknown encoding" and a fatal startup error.
+    // utf8 is a passthrough for UTF-8 content files; gbk enables the Chinese
+    // (CP936) converter added by cjk-encoding-support.patch.
+    val charsets = listOf("win1252", "win1250", "win1251", "gbk", "utf8")
     var selectedCharset by remember { mutableStateOf(readCurrentCharset()) }
     var feedbackMessage by remember { mutableStateOf("") }
 

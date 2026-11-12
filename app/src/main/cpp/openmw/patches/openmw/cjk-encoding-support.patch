@@ -1,0 +1,173 @@
+--- a/components/toutf8/toutf8.hpp
++++ b/components/toutf8/toutf8.hpp
+@@ -16,8 +16,15 @@
+         WINDOWS_1251, // Cyrillic languages
+         WINDOWS_1252, // Used by English version of Morrowind (and
+                       // probably others)
+-        CP437 // Used for fonts (*.fnt) if data files encoding is 1252. Otherwise, uses the same encoding as the data
+-              // files.
++        CP437, // Used for fonts (*.fnt) if data files encoding is 1252. Otherwise, uses the same encoding as the data
++               // files.
++
++        // CJK support. These two are not backed by a 256-entry translation
++        // table: UTF_8 is a passthrough and GBK needs a stateful DBCS
++        // converter. Both are flagged with a one-element sentinel array and
++        // must stay below 128 because the sentinel is a signed char.
++        UTF_8,
++        GBK
+     };
+ 
+     enum class BufferAllocationPolicy
+--- a/components/toutf8/toutf8.cpp
++++ b/components/toutf8/toutf8.cpp
+@@ -2,10 +2,18 @@
+ 
+ #include <algorithm>
+ #include <cassert>
++#include <cstring>
+ #include <ios>
+ #include <iterator>
+ #include <stdexcept>
+ 
++// GBK needs a DBCS converter. libiconv is used when available; define
++// OPENMW_CJK_NO_ICONV on targets without it to keep the dependency-free
++// UTF-8 passthrough mode buildable (GBK then falls back to raw bytes).
++#if !defined(_WIN32) && !defined(OPENMW_CJK_NO_ICONV)
++#include <iconv.h>
++#endif
++
+ #include <components/debug/debuglog.hpp>
+ 
+ /* This file contains the code to translate from WINDOWS-1252 (native
+@@ -47,6 +55,10 @@
+ 
+ namespace
+ {
++    // A one-element array marks an encoding that is not backed by a
++    // single-byte translation table (see ToUTF8::UTF_8 / ToUTF8::GBK).
++    static const signed char s_utf8[1] = { ToUTF8::UTF_8 }, s_gbk[1] = { ToUTF8::GBK };
++
+     std::string_view::iterator skipAscii(std::string_view input)
+     {
+         return std::find_if(input.begin(), input.end(), [](unsigned char v) { return v == 0 || v >= 128; });
+@@ -56,6 +68,10 @@
+     {
+         switch (sourceEncoding)
+         {
++            case ToUTF8::UTF_8:
++                return { s_utf8, 1 };
++            case ToUTF8::GBK:
++                return { s_gbk, 1 };
+             case ToUTF8::WINDOWS_1252:
+                 return { ToUTF8::windows_1252, std::size(ToUTF8::windows_1252) };
+             case ToUTF8::WINDOWS_1250:
+@@ -93,7 +109,42 @@
+                 // And make sure the string is zero terminated
+                 buffer[size] = 0;
+                 break;
++        }
++    }
++
++    // GBK is a variable-length double-byte charset and cannot go through the
++    // 256-entry translation tables. Convert it with libiconv instead. The
++    // converter is opened per call because StatelessUtf8Encoder must stay
++    // stateless and thread-safe. If no converter is available the input is
++    // copied unchanged, so the engine keeps running instead of aborting.
++    std::size_t convertWithIconv(const char* toCode, const char* fromCode, std::string_view input,
++        BufferAllocationPolicy bufferAllocationPolicy, std::string& buffer, std::size_t bytesPerChar)
++    {
++        const std::size_t limit = input.size() * bytesPerChar + 1;
++#if defined(_WIN32) || defined(OPENMW_CJK_NO_ICONV)
++        (void)toCode;
++        (void)fromCode;
++#else
++        iconv_t cd = iconv_open(toCode, fromCode);
++        if (cd != reinterpret_cast<iconv_t>(-1))
++        {
++            resize(limit + 1, bufferAllocationPolicy, buffer);
++            char* inBuf = const_cast<char*>(input.data());
++            char* outBuf = buffer.data();
++            std::size_t inLeft = input.size();
++            std::size_t outLeft = limit;
++            iconv(cd, &inBuf, &inLeft, &outBuf, &outLeft);
++            iconv_close(cd);
++            const std::size_t written = limit - outLeft;
++            buffer[written] = 0;
++            return written;
+         }
++#endif
++        // Fallback: keep the bytes as they are (mojibake, but not a crash).
++        resize(input.size() + 1, bufferAllocationPolicy, buffer);
++        std::memcpy(buffer.data(), input.data(), input.size());
++        buffer[input.size()] = 0;
++        return input.size();
+     }
+ }
+ 
+@@ -108,6 +159,20 @@
+     if (input.empty())
+         return input;
+ 
++    // CJK encodings are handled before the ASCII fast path, which assumes a
++    // single-byte source charset sharing ASCII 0-127.
++    if (mTranslationArray.size() == 1)
++    {
++        if (mTranslationArray[0] == ToUTF8::UTF_8)
++            return input; // Content files are already UTF-8: no conversion.
++        if (mTranslationArray[0] == ToUTF8::GBK)
++        {
++            const std::size_t written
++                = convertWithIconv("UTF-8", "GBK", input, bufferAllocationPolicy, buffer, 4);
++            return std::string_view(buffer.data(), written);
++        }
++    }
++
+     // Note: The rest of this function is designed for single-character
+     // input encodings only. It also assumes that the input encoding
+     // shares its first 128 values (0-127) with ASCII. There are no plans
+@@ -146,6 +211,19 @@
+     if (input.empty())
+         return input;
+ 
++    // Reverse conversion, used when writing strings back to content files.
++    if (mTranslationArray.size() == 1)
++    {
++        if (mTranslationArray[0] == ToUTF8::UTF_8)
++            return input;
++        if (mTranslationArray[0] == ToUTF8::GBK)
++        {
++            const std::size_t written
++                = convertWithIconv("GBK", "UTF-8", input, bufferAllocationPolicy, buffer, 2);
++            return std::string_view(buffer.data(), written);
++        }
++    }
++
+     // TODO: The rest of this function is designed for single-character
+     // input encodings only. It also assumes that the input the input
+     // encoding shares its first 128 values (0-127) with ASCII. These
+@@ -360,7 +438,11 @@
+ 
+ ToUTF8::FromType ToUTF8::calculateEncoding(std::string_view encodingName)
+ {
+-    if (encodingName == "win1250")
++    if (encodingName == "utf8")
++        return ToUTF8::UTF_8;
++    else if (encodingName == "gbk")
++        return ToUTF8::GBK;
++    else if (encodingName == "win1250")
+         return ToUTF8::WINDOWS_1250;
+     else if (encodingName == "win1251")
+         return ToUTF8::WINDOWS_1251;
+@@ -373,7 +455,11 @@
+ 
+ std::string ToUTF8::encodingUsingMessage(std::string_view encodingName)
+ {
+-    if (encodingName == "win1250")
++    if (encodingName == "utf8")
++        return "Using UTF-8 (no conversion) font encoding.";
++    else if (encodingName == "gbk")
++        return "Using Chinese (GBK) font encoding.";
++    else if (encodingName == "win1250")
+         return "Using Central and Eastern European font encoding.";
+     else if (encodingName == "win1251")
+         return "Using Cyrillic font encoding.";

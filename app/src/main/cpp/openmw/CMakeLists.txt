@@ -731,6 +731,9 @@ set(OPENMW_COMMON
 	-DMyGUI_LIBRARY=${prefix}/lib/libMyGUIEngineStatic.a
 )
 
+# cjk-encoding-support.patch is generated against OPENMW_VERSION and adds
+# encoding=gbk / encoding=utf8 to ToUTF8::calculateEncoding plus a GBK
+# (DBCS) converter on top of the companion patches.
 set(OPENMW_PATCH
     patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/0009-windowmanagerimp-always-show-mouse-when-possible-pat.patch || true &&
     patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/androidPath.patch || true &&
@@ -803,7 +806,8 @@ set(OPENMW_PATCH
 	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-console-hint.patch || true &&
 	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-map-stick-input.patch || true &&
 	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-settings-window-fit.patch || true &&
-	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-quickkeys-snapshot.patch || true
+	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-quickkeys-snapshot.patch || true &&
+	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-encoding-support.patch || true
 )
 
 if(OPENMW_SRC)
@@ -847,6 +851,11 @@ add_custom_target(copy_final ALL
 
 	#Copy extras
 	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/openmw/extras/ ${jni_libs_dir}/
+
+	# CJK font resources: overlay into resources/vfs/fonts produced by the
+	# openmw install step. The font is opt-in via fallback=Fonts_Font_0,zh_CN
+	# in openmw.cfg, so shipping the files alone does not change the default UI.
+	COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/openmw/cjk-fonts/fonts ${GENERATED_ASSETS_DIR}/libopenmw/resources/vfs/fonts
 
 	#Final Copy of assets
 	COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_ROOT}/settings.fallback.cfg ${GENERATED_ASSETS_DIR}/libopenmw/openmw/
