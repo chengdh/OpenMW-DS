@@ -40,6 +40,17 @@ jobs:
             /usr/share/swift /opt/hostedtoolcache/CodeQL || true
           df -h /
 
+      # The project's CI runs on Fedora, where /bin/sh is bash. On Ubuntu it is
+      # dash, and dash does not expand the brace glob in the boost install step
+      # (libboost_{filesystem,program_options,iostreams}.a), so llvm-ranlib is
+      # handed a literal filename and the native build dies. Point sh at bash for
+      # Fedora parity.
+      - name: Use bash as /bin/sh (Fedora CI parity)
+        run: |
+          sudo ln -sfn /bin/bash /bin/sh
+          /bin/sh -c 'echo "sh -> $0"; echo "brace test: libboost_{a,b}.a"'
+          ls -l /bin/sh
+
       - name: Install Android SDK packages
         run: |
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
