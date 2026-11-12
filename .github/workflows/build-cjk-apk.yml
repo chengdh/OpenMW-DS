@@ -8,6 +8,8 @@ name: CJK build (debug APK)
 on:
   push:
     branches: [ chinese-gbk-support ]
+    paths-ignore:
+      - .github/workflows/hybrid-apk.yml
   workflow_dispatch:
 
 permissions:
@@ -96,7 +98,13 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /mnt/work/gradle.log
 
-      - name: Verify the engine patch landed and the APK exists
+      - name: Restore signing keystore
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.signing
+          key: cjk-debug-keystore-v1
+
+      - name: Verify the engine patch landed
         if: always()
         run: |
           SRC=$(find "$GITHUB_WORKSPACE/app/.cxx-docker" -name toutf8.cpp -path "*components/toutf8*" 2>/dev/null | head -1)
@@ -104,17 +112,64 @@ jobs:
           if [ -n "$SRC" ]; then
             grep -n "Using Chinese (GBK) font encoding" "$SRC" && echo "PATCH APPLIED"
           fi
-          mkdir -p "$GITHUB_WORKSPACE/out"
-          cp /mnt/work/build/outputs/apk/debug/*.apk "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
-          ls -la "$GITHUB_WORKSPACE/out"
+          ls -la /mnt/work/build/generated_assets/libopenmw 2>/dev/null | head
+          echo "generated engine assets: $(find /mnt/work/build/generated_assets -type f 2>/dev/null | wc -l) files"
           df -h /
+
+      # AGP's asset merge drops the CMake-generated `assets/libopenmw/**` tree on
+      # this runner (mergeDebugAssets finishes in ~0.1 s and packages nothing),
+      # which strips every engine resource from the APK and makes the app crash
+      # on start. Detect that and graft the tree back in, then re-sign.
+      - name: Finalize the APK (inject engine assets if AGP dropped them)
+        if: always()
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BT="$SDK/build-tools/36.0.0"
+          APK=$(ls /mnt/work/build/outputs/apk/debug/*.apk 2>/dev/null | head -1 || true)
+          if [ -z "$APK" ]; then echo "no APK produced"; exit 1; fi
+          echo "APK: $APK"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+
+          if unzip -l "$APK" | grep -q "assets/libopenmw/resources/vfs/fonts/zh_CN.omwfont"; then
+            echo "engine assets already packaged — shipping the Gradle output as-is"
+            cp "$APK" "$GITHUB_WORKSPACE/out/app-debug.apk"
+            ls -lh "$GITHUB_WORKSPACE/out"
+            exit 0
+          fi
+
+          echo "::warning::AGP dropped assets/libopenmw from the APK — grafting it back post-build"
+          SRC=/mnt/work/build/generated_assets/libopenmw
+          test -d "$SRC" || { echo "generated assets missing at $SRC"; exit 1; }
+          echo "grafting $(find "$SRC" -type f | wc -l) files"
+
+          WORK=/mnt/work/hybrid
+          rm -rf "$WORK"; mkdir -p "$WORK/stage/assets"
+          cp -a "$SRC" "$WORK/stage/assets/libopenmw"
+          cp "$APK" "$WORK/raw.apk"
+          ( cd "$WORK/stage" && zip -q -X -r "$WORK/raw.apk" assets )
+
+          "$BT/zipalign" -f -p 4 "$WORK/raw.apk" "$WORK/aligned.apk"
+
+          KS="$GITHUB_WORKSPACE/.signing/debug.keystore"
+          mkdir -p "$(dirname "$KS")"
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
+              -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" \
+              -keyalg RSA -keysize 2048 -validity 10000
+          fi
+
+          "$BT/apksigner" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
+            --ks-key-alias androiddebugkey --out "$GITHUB_WORKSPACE/out/app-debug.apk" "$WORK/aligned.apk"
+          echo "assets in final APK: $(unzip -l "$GITHUB_WORKSPACE/out/app-debug.apk" | grep -c 'assets/libopenmw')"
+          ls -lh "$GITHUB_WORKSPACE/out"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: openmw-ds-cjk-debug
           path: ${{ github.workspace }}/out/*.apk
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload build log
         if: always()
