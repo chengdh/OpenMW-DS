@@ -10,9 +10,9 @@
 +               // files.
 +
 +        // CJK support. These two are not backed by a 256-entry translation
-+        // table: UTF_8 is a passthrough and GBK needs a stateful DBCS
-+        // converter. Both are flagged with a one-element sentinel array and
-+        // must stay below 128 because the sentinel is a signed char.
++        // table: UTF_8 is a passthrough and GBK is a variable-length double-byte
++        // charset. Both are flagged with a one-element sentinel array and must
++        // stay below 128 because the sentinel is a signed char.
 +        UTF_8,
 +        GBK
      };
@@ -20,7 +20,7 @@
      enum class BufferAllocationPolicy
 --- a/components/toutf8/toutf8.cpp
 +++ b/components/toutf8/toutf8.cpp
-@@ -2,10 +2,18 @@
+@@ -2,10 +2,27 @@
  
  #include <algorithm>
  #include <cassert>
@@ -29,17 +29,26 @@
  #include <iterator>
  #include <stdexcept>
  
-+// GBK needs a DBCS converter. libiconv is used when available; define
-+// OPENMW_CJK_NO_ICONV on targets without it to keep the dependency-free
-+// UTF-8 passthrough mode buildable (GBK then falls back to raw bytes).
-+#if !defined(_WIN32) && !defined(OPENMW_CJK_NO_ICONV)
++// CJK: GBK is a double-byte charset that the single-byte translation tables
++// cannot express, so a real converter is needed. ICU is preferred because the
++// Android build always links it (OPENMW_USE_SYSTEM_ICU=ON) and bionic ships no
++// iconv at all. libiconv is the desktop fallback. Define
++// OPENMW_CJK_NO_ICONV to build with neither: GBK then passes bytes through
++// unchanged, which shows mojibake but never breaks the link or the startup.
++#if defined(OPENMW_CJK_USE_ICU) || defined(__ANDROID__)
++#include <unicode/ucnv.h>
++#define OPENMW_CJK_HAVE_ICU 1
++#endif
++
++#if !defined(OPENMW_CJK_HAVE_ICU) && !defined(_WIN32) && !defined(OPENMW_CJK_NO_ICONV)
 +#include <iconv.h>
++#define OPENMW_CJK_HAVE_ICONV 1
 +#endif
 +
  #include <components/debug/debuglog.hpp>
  
  /* This file contains the code to translate from WINDOWS-1252 (native
-@@ -47,6 +55,10 @@
+@@ -47,6 +64,10 @@
  
  namespace
  {
@@ -50,7 +59,7 @@
      std::string_view::iterator skipAscii(std::string_view input)
      {
          return std::find_if(input.begin(), input.end(), [](unsigned char v) { return v == 0 || v >= 128; });
-@@ -56,6 +68,10 @@
+@@ -56,6 +77,10 @@
      {
          switch (sourceEncoding)
          {
@@ -61,63 +70,116 @@
              case ToUTF8::WINDOWS_1252:
                  return { ToUTF8::windows_1252, std::size(ToUTF8::windows_1252) };
              case ToUTF8::WINDOWS_1250:
-@@ -93,7 +109,42 @@
-                 // And make sure the string is zero terminated
-                 buffer[size] = 0;
+@@ -95,6 +120,93 @@
                  break;
-+        }
-+    }
-+
-+    // GBK is a variable-length double-byte charset and cannot go through the
-+    // 256-entry translation tables. Convert it with libiconv instead. The
-+    // converter is opened per call because StatelessUtf8Encoder must stay
-+    // stateless and thread-safe. If no converter is available the input is
-+    // copied unchanged, so the engine keeps running instead of aborting.
-+    std::size_t convertWithIconv(const char* toCode, const char* fromCode, std::string_view input,
-+        BufferAllocationPolicy bufferAllocationPolicy, std::string& buffer, std::size_t bytesPerChar)
-+    {
-+        const std::size_t limit = input.size() * bytesPerChar + 1;
-+#if defined(_WIN32) || defined(OPENMW_CJK_NO_ICONV)
-+        (void)toCode;
-+        (void)fromCode;
-+#else
-+        iconv_t cd = iconv_open(toCode, fromCode);
-+        if (cd != reinterpret_cast<iconv_t>(-1))
-+        {
-+            resize(limit + 1, bufferAllocationPolicy, buffer);
-+            char* inBuf = const_cast<char*>(input.data());
-+            char* outBuf = buffer.data();
-+            std::size_t inLeft = input.size();
-+            std::size_t outLeft = limit;
-+            iconv(cd, &inBuf, &inLeft, &outBuf, &outLeft);
-+            iconv_close(cd);
-+            const std::size_t written = limit - outLeft;
-+            buffer[written] = 0;
-+            return written;
          }
-+#endif
-+        // Fallback: keep the bytes as they are (mojibake, but not a crash).
+     }
++
++    // Copy the bytes through untouched: wrong glyphs, but no crash and no
++    // dependency. Used when no converter is available.
++    std::size_t copyRaw(std::string_view input, BufferAllocationPolicy bufferAllocationPolicy,
++        std::string& buffer)
++    {
 +        resize(input.size() + 1, bufferAllocationPolicy, buffer);
 +        std::memcpy(buffer.data(), input.data(), input.size());
 +        buffer[input.size()] = 0;
 +        return input.size();
-     }
++    }
++
++#if defined(OPENMW_CJK_HAVE_ICU)
++    // Returns the number of bytes written to the buffer, or -1 when ICU cannot
++    // convert (unknown charset, malformed input).
++    long convertWithIcu(const char* toCode, const char* fromCode, std::string_view input,
++        BufferAllocationPolicy bufferAllocationPolicy, std::string& buffer)
++    {
++        UErrorCode status = U_ZERO_ERROR;
++        // A null destination makes ucnv_convert report the required capacity.
++        const int32_t capacity = ucnv_convert(
++            toCode, fromCode, nullptr, 0, input.data(), static_cast<int32_t>(input.size()), &status);
++        if (status != U_BUFFER_OVERFLOW_ERROR && U_FAILURE(status))
++            return -1;
++
++        status = U_ZERO_ERROR;
++        resize(static_cast<std::size_t>(capacity) + 1, bufferAllocationPolicy, buffer);
++        const int32_t written = ucnv_convert(toCode, fromCode, buffer.data(), capacity,
++            input.data(), static_cast<int32_t>(input.size()), &status);
++        if (U_FAILURE(status))
++            return -1;
++        buffer[written] = 0;
++        return written;
++    }
++#endif
++
++#if defined(OPENMW_CJK_HAVE_ICONV)
++    long convertWithIconv(const char* toCode, const char* fromCode, std::string_view input,
++        BufferAllocationPolicy bufferAllocationPolicy, std::string& buffer, std::size_t bytesPerChar)
++    {
++        iconv_t cd = iconv_open(toCode, fromCode);
++        if (cd == reinterpret_cast<iconv_t>(-1))
++            return -1;
++
++        const std::size_t limit = input.size() * bytesPerChar + 1;
++        resize(limit + 1, bufferAllocationPolicy, buffer);
++        char* inBuf = const_cast<char*>(input.data());
++        char* outBuf = buffer.data();
++        std::size_t inLeft = input.size();
++        std::size_t outLeft = limit;
++        const std::size_t result = iconv(cd, &inBuf, &inLeft, &outBuf, &outLeft);
++        iconv_close(cd);
++        if (result == static_cast<std::size_t>(-1))
++            return -1;
++
++        const std::size_t written = limit - outLeft;
++        buffer[written] = 0;
++        return static_cast<long>(written);
++    }
++#endif
++
++    // Convert between UTF-8 and a CJK charset, degrading gracefully: ICU, then
++    // libiconv, then raw bytes. Never returns an invalid range.
++    std::size_t convertCjk(const char* toCode, const char* fromCode, std::string_view input,
++        BufferAllocationPolicy bufferAllocationPolicy, std::string& buffer, std::size_t bytesPerChar)
++    {
++        if (input.empty())
++        {
++            resize(1, bufferAllocationPolicy, buffer);
++            buffer[0] = 0;
++            return 0;
++        }
++
++#if defined(OPENMW_CJK_HAVE_ICU)
++        const long icuWritten
++            = convertWithIcu(toCode, fromCode, input, bufferAllocationPolicy, buffer);
++        if (icuWritten >= 0)
++            return static_cast<std::size_t>(icuWritten);
++#endif
++#if defined(OPENMW_CJK_HAVE_ICONV)
++        const long iconvWritten = convertWithIconv(
++            toCode, fromCode, input, bufferAllocationPolicy, buffer, bytesPerChar);
++        if (iconvWritten >= 0)
++            return static_cast<std::size_t>(iconvWritten);
++#endif
++        return copyRaw(input, bufferAllocationPolicy, buffer);
++    }
  }
  
-@@ -108,6 +159,20 @@
+ StatelessUtf8Encoder::StatelessUtf8Encoder(FromType sourceEncoding)
+@@ -107,7 +219,22 @@
+ {
      if (input.empty())
          return input;
- 
++
 +    // CJK encodings are handled before the ASCII fast path, which assumes a
-+    // single-byte source charset sharing ASCII 0-127.
++    // single-byte source charset that shares ASCII 0-127.
 +    if (mTranslationArray.size() == 1)
 +    {
 +        if (mTranslationArray[0] == ToUTF8::UTF_8)
-+            return input; // Content files are already UTF-8: no conversion.
++            return input; // Content files are already UTF-8: no conversion needed.
+ 
 +        if (mTranslationArray[0] == ToUTF8::GBK)
 +        {
-+            const std::size_t written
-+                = convertWithIconv("UTF-8", "GBK", input, bufferAllocationPolicy, buffer, 4);
++            const std::size_t written = convertCjk(
++                "UTF-8", "GBK", input, bufferAllocationPolicy, buffer, 4);
 +            return std::string_view(buffer.data(), written);
 +        }
 +    }
@@ -125,19 +187,20 @@
      // Note: The rest of this function is designed for single-character
      // input encodings only. It also assumes that the input encoding
      // shares its first 128 values (0-127) with ASCII. There are no plans
-@@ -146,6 +211,19 @@
+@@ -146,6 +273,20 @@
      if (input.empty())
          return input;
  
-+    // Reverse conversion, used when writing strings back to content files.
++    // Reverse direction, used when strings are written back to content files.
 +    if (mTranslationArray.size() == 1)
 +    {
 +        if (mTranslationArray[0] == ToUTF8::UTF_8)
 +            return input;
++
 +        if (mTranslationArray[0] == ToUTF8::GBK)
 +        {
-+            const std::size_t written
-+                = convertWithIconv("GBK", "UTF-8", input, bufferAllocationPolicy, buffer, 2);
++            const std::size_t written = convertCjk(
++                "GBK", "UTF-8", input, bufferAllocationPolicy, buffer, 2);
 +            return std::string_view(buffer.data(), written);
 +        }
 +    }
@@ -145,7 +208,7 @@
      // TODO: The rest of this function is designed for single-character
      // input encodings only. It also assumes that the input the input
      // encoding shares its first 128 values (0-127) with ASCII. These
-@@ -360,7 +438,11 @@
+@@ -360,7 +501,11 @@
  
  ToUTF8::FromType ToUTF8::calculateEncoding(std::string_view encodingName)
  {
@@ -158,7 +221,7 @@
          return ToUTF8::WINDOWS_1250;
      else if (encodingName == "win1251")
          return ToUTF8::WINDOWS_1251;
-@@ -373,7 +455,11 @@
+@@ -373,7 +518,11 @@
  
  std::string ToUTF8::encodingUsingMessage(std::string_view encodingName)
  {

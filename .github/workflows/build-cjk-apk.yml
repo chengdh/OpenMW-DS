@@ -1,0 +1,114 @@
+name: CJK build (debug APK)
+
+# Builds the fork's debug APK on a native amd64 runner so the CJK engine patch
+# and the bundled Chinese font get compiled and packaged end to end. Local
+# builds are impractical on Apple Silicon: the Android NDK is x86_64-host only,
+# so the whole OpenMW tree would compile under emulation.
+
+on:
+  push:
+    branches: [ chinese-gbk-support ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  OPENMW_PIN: b6b04ca2284f56b9c8b15115d90240a35de8035c
+
+jobs:
+  build:
+    name: assembleDebug (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+            /usr/local/lib/android/sdk/system-images /opt/ghc /usr/local/.ghcup \
+            /usr/share/swift /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Install Android SDK packages
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "SDK=$SDK"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platform-tools" "platforms;android-36" \
+            "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1" >/dev/null
+          # compileSdk is 37; let AGP resolve it if the platform is not published yet.
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-37" >/dev/null 2>&1 \
+            || echo "android-37 unavailable, AGP will resolve compileSdk 37 itself"
+          df -h /
+
+      - name: Pre-flight the CJK engine patch against the pinned OpenMW revision
+        run: |
+          mkdir -p /tmp/pin/components/toutf8
+          for f in toutf8.hpp toutf8.cpp; do
+            curl -fsSL "https://raw.githubusercontent.com/OpenMW/openmw/$OPENMW_PIN/components/toutf8/$f" \
+              -o "/tmp/pin/components/toutf8/$f"
+          done
+          cd /tmp/pin
+          patch -p1 --dry-run < "$GITHUB_WORKSPACE/app/src/main/cpp/openmw/patches/openmw/cjk-encoding-support.patch"
+          echo "PATCH APPLIES CLEANLY AGAINST $OPENMW_PIN"
+
+      - name: Relocate heavy build directories to /mnt
+        run: |
+          sudo mkdir -p /mnt/work/gradle /mnt/work/build /mnt/work/cxx /mnt/work/downloads /mnt/work/tmp
+          sudo chown -R "$(id -u):$(id -g)" /mnt/work
+          mkdir -p "$HOME/.cache"
+          ln -sfn /mnt/work/downloads "$HOME/.cache/openmw-android-downloads"
+          ln -sfn /mnt/work/build "$GITHUB_WORKSPACE/app/build"
+          ln -sfn /mnt/work/cxx "$GITHUB_WORKSPACE/app/.cxx-docker"
+          {
+            echo "GRADLE_USER_HOME=/mnt/work/gradle"
+            echo "TMPDIR=/mnt/work/tmp"
+            echo "ALPHA3_DOCKER=1"
+          } >> "$GITHUB_ENV"
+          df -h / /mnt
+
+      - name: Build debug APK
+        run: |
+          set -o pipefail
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /mnt/work/gradle.log
+
+      - name: Verify the engine patch landed and the APK exists
+        if: always()
+        run: |
+          SRC=$(find "$GITHUB_WORKSPACE/app/.cxx-docker" -name toutf8.cpp -path "*components/toutf8*" 2>/dev/null | head -1)
+          echo "engine source: ${SRC:-<not found>}"
+          if [ -n "$SRC" ]; then
+            grep -n "Using Chinese (GBK) font encoding" "$SRC" && echo "PATCH APPLIED"
+          fi
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp /mnt/work/build/outputs/apk/debug/*.apk "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
+          ls -la "$GITHUB_WORKSPACE/out"
+          df -h /
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmw-ds-cjk-debug
+          path: ${{ github.workspace }}/out/*.apk
+          if-no-files-found: warn
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-log
+          path: /mnt/work/gradle.log
+          if-no-files-found: warn
