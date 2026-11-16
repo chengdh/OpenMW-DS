@@ -52,7 +52,7 @@ extern "C" decls to the block that patch chain declared before updateVisible()).
 @@ -694,4 +702,32 @@
          if (mTradeWindow)
              mTradeWindow->setVisible(!companionDsBarter() && containsMode(GM_Barter));
-
+ 
 +        // COMPANION: per-element DS suppression for the single-mode "Game UI" windows not
 +        // otherwise managed in updateVisible (repair/levelup/spellmaking/enchanting/alchemy/
 +        // rest-wait). Each mode owns its window(s) via mGuiModeStates; when the matching element

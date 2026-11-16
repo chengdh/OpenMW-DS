@@ -2,11 +2,11 @@
 +++ b/apps/openmw/main.cpp
 @@ -74,7 +74,9 @@
      Settings::Manager::load(cfgMgr);
-
+ 
 +#ifndef __ANDROID__
      MWGui::DebugWindow::startLogRecording();
 +#endif
-
+ 
      engine.setGrabMouse(!variables["no-grab"].as<bool>());
-
+ 
      // Font encoding settings

@@ -31,7 +31,7 @@ diff --git a/apps/openmw/mwgui/tradewindow.cpp b/apps/openmw/mwgui/tradewindow.c
 +++ b/apps/openmw/mwgui/tradewindow.cpp
 @@ -11,12 +11,16 @@
  #include <unordered_map>
-
+ 
  #include <components/esm3/loadalch.hpp>
 +#include <components/esm3/loadappa.hpp>
  #include <components/esm3/loadarmo.hpp>

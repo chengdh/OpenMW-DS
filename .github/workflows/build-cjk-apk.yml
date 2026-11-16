@@ -135,6 +135,18 @@ jobs:
             exit 1
           fi
           echo "COMPANION TEXT INPUT PATCH APPLIED"
+          # companion-command-pump.patch is what makes anything ever read the
+          # command queue. Its second hunk has been rejected since forever, which
+          # left drainCompanionCommands() with zero call sites in the shipped
+          # binary: the bottom-screen keyboard queued CMPTEXT:set:<text> and
+          # nothing ever executed it.
+          SIW=$(find -L "$CXX_SRC" -name sdlinputwrapper.cpp -path "*sdlutil*" 2>/dev/null | head -1)
+          echo "input wrapper source: ${SIW:-<not found>}"
+          if [ -z "$SIW" ] || ! grep -q "drainCompanionCommands();" "$SIW"; then
+            echo "::error::companion-command-pump.patch hunk #2 did not apply - nothing drains the companion command queue"
+            exit 1
+          fi
+          echo "COMPANION COMMAND PUMP WIRED"
           ls -la /mnt/work/build/generated_assets/libopenmw 2>/dev/null | head
           echo "generated engine assets: $(find /mnt/work/build/generated_assets -type f 2>/dev/null | wc -l) files"
           df -h /

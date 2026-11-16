@@ -44,7 +44,7 @@ which are applied after this one in the chain and share this translation unit).
 @@ -640,6 +640,15 @@
          mConsole->updateSelectedObjectPtr(currentPtr, newPtr);
      }
-
+ 
 +#ifdef __ANDROID__
 +    // COMPANION: defined in androidmain.cpp. Each returns true when the matching Game UI element
 +    // is in DS mode, so the native top-screen window is suppressed (the companion draws it on the
@@ -62,7 +62,7 @@ which are applied after this one in the chain and share this translation unit).
          // COMPANION: keep floating actor-name tooltips visible even when the HUD is
          // hidden via the Hide UI toggle. update() only shows the focus-object name.
          mToolTips->setVisible(!loading);
-
+ 
 +        // COMPANION: hide the dialogue window when Conversation is in DS mode so the
 +        // companion (bottom) screen is the sole conversation surface; show the native
 +        // window when Conversation is Vanilla (companionDsConversation() false). Gated on

@@ -19,12 +19,12 @@ layer only; mHud stays gated by Hide UI exactly as before.
 @@ -645,7 +645,9 @@
          if (!mMap)
              return; // UI not created yet
-
+ 
          mHud->setVisible(mHudEnabled && !loading);
 -        mToolTips->setVisible(mHudEnabled && !loading);
 +        // COMPANION: keep floating actor-name tooltips visible even when the HUD is
 +        // hidden via the Hide UI toggle. update() only shows the focus-object name.
 +        mToolTips->setVisible(!loading);
-
+ 
          bool gameMode = !isGuiMode();
 

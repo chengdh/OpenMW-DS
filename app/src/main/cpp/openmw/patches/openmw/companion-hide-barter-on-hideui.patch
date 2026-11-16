@@ -35,7 +35,7 @@ pickpocket-finish-on-pop fix exactly.
 @@ -679,6 +679,15 @@
          if (mContainerWindow)
              mContainerWindow->setVisible(!companionDsLooting() && containsMode(GM_Container));
-
+ 
 +        // COMPANION: hide the barter (trade) window when Bartering is in DS mode so the
 +        // companion bottom screen is the sole barter surface; show the native window when
 +        // Bartering is Vanilla. TradeWindow::onClose() early-returns while containsMode(GM_Barter)
@@ -46,7 +46,7 @@ pickpocket-finish-on-pop fix exactly.
 +            mTradeWindow->setVisible(!companionDsBarter() && containsMode(GM_Barter));
 +
          bool gameMode = !isGuiMode();
-
+ 
          MWBase::Environment::get().getInputManager()->changeInputMode(!gameMode);
 @@ -740,6 +749,13 @@
              // back to Vanilla, so nothing breaks.
@@ -60,7 +60,7 @@ pickpocket-finish-on-pop fix exactly.
 +            if (mInventoryWindow && companionDsBarter() && getMode() == GM_Barter)
 +                mInventoryWindow->setVisible(false);
          }
-
+ 
          GuiMode mode = mGuiModes.back();
 @@ -1541,10 +1557,21 @@
                  // so we must not double-run — hence the !isVisible() gate.

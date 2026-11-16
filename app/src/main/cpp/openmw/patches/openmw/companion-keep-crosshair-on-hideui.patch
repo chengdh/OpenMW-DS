@@ -25,7 +25,7 @@ click-through (a reticle must never steal the centre tap from the world).
 +++ b/apps/openmw/mwgui/hud.cpp
 @@ -92,5 +92,21 @@
          getWidget(mWeaponSpellBox, "WeaponSpellName");
-
+ 
          getWidget(mCrosshair, "Crosshair");
 +
 +        // COMPANION: detach the crosshair from the HUD's main widget so it is not
@@ -43,5 +43,5 @@ click-through (a reticle must never steal the centre tap from the world).
 +            mCrosshair->setCoord((crossView.width - crossSize.width) / 2,
 +                (crossView.height - crossSize.height) / 2, crossSize.width, crossSize.height);
 +        }
-
+ 
          LocalMapBase::init(mMinimap, mCompass);

@@ -11,6 +11,8 @@ on:
   push:
     paths:
       - '.github/workflows/patch-rehearsal.yml'
+      - 'app/src/main/cpp/openmw/patches/openmw/**.patch'
+      - 'app/src/main/cpp/openmw/CMakeLists.txt'
 
 jobs:
   rehearsal:

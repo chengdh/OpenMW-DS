@@ -168,7 +168,7 @@ diff --git a/apps/openmw/mwgui/windowmanagerimp.cpp b/apps/openmw/mwgui/windowma
          if (mControllerTooltipEnabled && !mControllerTooltipVisible)
              setControllerTooltipVisible(true);
      }
-
+ 
 +#ifdef __ANDROID__
 +    // COMPANION: gate for the controller button-hint bar (defined in androidmain.cpp).
 +    extern "C" bool companionHudControllerTooltips();
