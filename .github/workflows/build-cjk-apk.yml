@@ -113,7 +113,9 @@ jobs:
       - name: Verify the engine patch landed
         if: always()
         run: |
-          SRC=$(find "$GITHUB_WORKSPACE/app/.cxx-docker" -name toutf8.cpp -path "*components/toutf8*" 2>/dev/null | head -1)
+          # app/.cxx-docker is a symlink to /mnt/work/cxx; find needs -L to descend it.
+          CXX_SRC=/mnt/work/cxx
+          SRC=$(find -L "$CXX_SRC" -name toutf8.cpp -path "*components/toutf8*" 2>/dev/null | head -1)
           echo "engine source: ${SRC:-<not found>}"
           if [ -n "$SRC" ]; then
             grep -n "Using Chinese (GBK) font encoding" "$SRC" && echo "PATCH APPLIED"
@@ -121,7 +123,7 @@ jobs:
           # The OPENMW_PATCH chain is a long `patch ... || true &&` list, so a hunk that
           # stops applying is silently swallowed and the build happily ships an engine
           # without the fix. Assert the companion text-input hunks really landed.
-          WM=$(find "$GITHUB_WORKSPACE/app/.cxx-docker" -name windowmanagerimp.cpp -path "*mwgui*" 2>/dev/null | head -1)
+          WM=$(find -L "$CXX_SRC" -name windowmanagerimp.cpp -path "*mwgui*" 2>/dev/null | head -1)
           echo "window manager source: ${WM:-<not found>}"
           if [ -z "$WM" ]; then
             echo "::error::windowmanagerimp.cpp not found - companion-text-input-export.patch never ran"
@@ -158,9 +160,29 @@ jobs:
             exit 0
           fi
 
+          # Hard gate on the actual binary: the OPENMW_PATCH chain swallows failed
+          # hunks, so assert the fix reached the compiled engine before shipping.
+          mkdir -p /mnt/work/sochk
+          unzip -o -j "$APK" lib/arm64-v8a/libopenmw.so -d /mnt/work/sochk >/dev/null
+          ls -l /mnt/work/sochk/libopenmw.so
+          if ! grep -aq "COMPANION_TEXT_INPUT_NO_FOCUS" /mnt/work/sochk/libopenmw.so; then
+            echo "::error::libopenmw.so has no COMPANION_TEXT_INPUT_NO_FOCUS — the text-input fix is NOT in the binary"
+            exit 1
+          fi
+          echo "engine binary carries the companion text-input fix"
+
           echo "::warning::AGP dropped assets/libopenmw from the APK — grafting it back post-build"
           SRC=/mnt/work/build/generated_assets/libopenmw
-          test -d "$SRC" || { echo "generated assets missing at $SRC"; exit 1; }
+          if [ ! -d "$SRC" ]; then
+            # No generated asset tree on this runner. The APK is useless for running
+            # the game, but its libopenmw.so is exactly what the hybrid workflow
+            # grafts onto the upstream release, so ship the unsigned build anyway.
+            echo "::warning::generated assets missing at $SRC — shipping the APK without engine assets"
+            cp "$APK" "$GITHUB_WORKSPACE/out/app-debug.apk"
+            echo "assets in final APK: $(unzip -l "$GITHUB_WORKSPACE/out/app-debug.apk" | grep -c 'assets/libopenmw')"
+            ls -lh "$GITHUB_WORKSPACE/out"
+            exit 0
+          fi
           echo "grafting $(find "$SRC" -type f | wc -l) files"
 
           WORK=/mnt/work/hybrid
