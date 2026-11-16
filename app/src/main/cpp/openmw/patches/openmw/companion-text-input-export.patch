@@ -90,7 +90,7 @@
 +            gCompanionTextInput = focusedEdit;
 +        if (!gCompanionTextInput)
 +        {
-+            Log(Debug::Warn) << "COMPANION_TEXT_INPUT_NO_FOCUS: CMPTEXT:set ignored, no focused EditBox";
++            Log(Debug::Warning) << "COMPANION_TEXT_INPUT_NO_FOCUS: CMPTEXT:set ignored, no focused EditBox";
 +            return;
 +        }
 +        MyGUI::EditBox* field = gCompanionTextInput;

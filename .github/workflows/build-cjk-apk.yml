@@ -99,6 +99,10 @@ jobs:
           set -o pipefail
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee /mnt/work/gradle.log
+        env:
+          # The launcher JVM reads the daemon's result over a socket and OOMed on a
+          # default-sized heap when a build produced a large error payload.
+          GRADLE_OPTS: "-Xmx2g -Dfile.encoding=UTF-8"
 
       - name: Restore signing keystore
         uses: actions/cache@v4
@@ -114,6 +118,20 @@ jobs:
           if [ -n "$SRC" ]; then
             grep -n "Using Chinese (GBK) font encoding" "$SRC" && echo "PATCH APPLIED"
           fi
+          # The OPENMW_PATCH chain is a long `patch ... || true &&` list, so a hunk that
+          # stops applying is silently swallowed and the build happily ships an engine
+          # without the fix. Assert the companion text-input hunks really landed.
+          WM=$(find "$GITHUB_WORKSPACE/app/.cxx-docker" -name windowmanagerimp.cpp -path "*mwgui*" 2>/dev/null | head -1)
+          echo "window manager source: ${WM:-<not found>}"
+          if [ -z "$WM" ]; then
+            echo "::error::windowmanagerimp.cpp not found - companion-text-input-export.patch never ran"
+            exit 1
+          fi
+          if ! grep -q "COMPANION FIX: onKeyFocusChanged is not always called" "$WM"; then
+            echo "::error::companion-text-input-export.patch did not apply - the name/class/save entry fix is missing"
+            exit 1
+          fi
+          echo "COMPANION TEXT INPUT PATCH APPLIED"
           ls -la /mnt/work/build/generated_assets/libopenmw 2>/dev/null | head
           echo "generated engine assets: $(find /mnt/work/build/generated_assets -type f 2>/dev/null | wc -l) files"
           df -h /
