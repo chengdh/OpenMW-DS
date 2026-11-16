@@ -26,7 +26,7 @@
  #include <MyGUI_FactoryManager.h>
  #include <MyGUI_InputManager.h>
  #include <MyGUI_LanguageManager.h>
-@@ -2067,7 +2069,154 @@
+@@ -2067,7 +2069,161 @@
      {
          MyGUI::InputManager::getInstance().setKeyFocusWidget(widget);
          onKeyFocusChanged(widget);
@@ -88,6 +88,13 @@
 +        if (focusedEdit && !focusedEdit->getEditReadOnly() && !focusedEdit->getEditStatic()
 +            && !focusedEdit->castType<Gui::NumericEditBox>(false))
 +            gCompanionTextInput = focusedEdit;
++        // Not COMPANION_-prefixed on purpose: the disk log filter in debugging.cpp drops those,
++        // and this line is the only way to see what the write-back found when the bottom-screen
++        // keyboard confirms. Lands in openmw.log as TXTIN_SUBMIT.
++        Log(Debug::Info) << "TXTIN_SUBMIT focusWidget=" << (focusWidget ? "yes" : "no")
++                         << " editable=" << (focusedEdit ? "yes" : "no")
++                         << " target=" << (gCompanionTextInput ? "yes" : "no")
++                         << " text=" << utf8;
 +        if (!gCompanionTextInput)
 +        {
 +            Log(Debug::Warning) << "COMPANION_TEXT_INPUT_NO_FOCUS: CMPTEXT:set ignored, no focused EditBox";
