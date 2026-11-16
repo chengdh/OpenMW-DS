@@ -8,9 +8,6 @@ name: Patch rehearsal
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/patch-rehearsal.yml'
 
 jobs:
   rehearsal:
@@ -30,6 +27,7 @@ jobs:
       - name: Replay the patch chain
         run: |
           set -o pipefail
+          set +e
           patch --version | head -2
           echo "-----------------------------"
 
@@ -41,7 +39,7 @@ jobs:
           FAILED=0
           while read -r rel; do
             name=$(basename "$rel")
-            out=$(cd /tmp/engine && patch -d . -p1 -t -N < "$GITHUB_WORKSPACE/app/src/main/cpp/openmw/$rel" 2>&1)
+            out=$(cd /tmp/engine && patch -d . -p1 -t -N < "$GITHUB_WORKSPACE/app/src/main/cpp/openmw/$rel" 2>&1) || true
             if echo "$out" | grep -qE "FAILED|malformed|saving rejects"; then
               FAILED=$((FAILED+1))
               echo "::error::REJECTED: $name"
