@@ -1,0 +1,73 @@
+name: Patch rehearsal
+
+# Replays the whole OPENMW_PATCH chain against the pinned engine tarball using the
+# runner's own `patch` binary. The real build swallows every rejection with
+# `|| true`, so a hunk that stops applying ships a silently broken engine and only
+# surfaces 50 minutes later as "the feature does nothing". This job takes about a
+# minute and fails loudly with the rejected hunk plus the surrounding source.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rehearsal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the pinned engine source
+        run: |
+          PIN=$(grep -oE 'b6b04ca[0-9a-f]{33}' app/src/main/cpp/openmw/CMakeLists.txt | head -1)
+          echo "pin=$PIN"
+          mkdir -p /tmp/engine
+          curl -fsSL "https://github.com/sisah2/openmw/archive/$PIN.tar.gz" -o /tmp/engine.tgz
+          tar -xzf /tmp/engine.tgz -C /tmp/engine --strip-components=1
+          echo "src files: $(find /tmp/engine -type f | wc -l)"
+
+      - name: Replay the patch chain
+        run: |
+          set -o pipefail
+          patch --version | head -2
+          echo "-----------------------------"
+
+          # Same order and flags as the CMake chain.
+          grep -oE 'patches/openmw/[A-Za-z0-9._-]+\.patch' \
+            app/src/main/cpp/openmw/CMakeLists.txt > /tmp/order.txt
+          echo "patches in chain: $(wc -l < /tmp/order.txt)"
+
+          FAILED=0
+          while read -r rel; do
+            name=$(basename "$rel")
+            out=$(cd /tmp/engine && patch -d . -p1 -t -N < "$GITHUB_WORKSPACE/app/src/main/cpp/openmw/$rel" 2>&1)
+            if echo "$out" | grep -qE "FAILED|malformed|saving rejects"; then
+              FAILED=$((FAILED+1))
+              echo "::error::REJECTED: $name"
+              echo "$out" | sed 's/^/    /'
+              for rej in $(cd /tmp/engine && find . -name '*.rej' 2>/dev/null); do
+                echo "---- $rej (expected context) ----"
+                head -40 "/tmp/engine/$rej"
+                tgt="${rej%.rej}"
+                echo "---- $tgt (actual content, +-6 lines around the hunk) ----"
+                start=$(grep -m1 -oE '^@@ -[0-9]+' "/tmp/engine/$rej" | tr -dc '0-9')
+                start=${start:-1}
+                sed -n "$((start>6 ? start-6 : 1)),$((start+30))p" "/tmp/engine/$tgt"
+                rm -f "/tmp/engine/$rej"
+              done
+            fi
+          done < /tmp/order.txt
+
+          echo "-----------------------------"
+          echo "rejected patches: $FAILED"
+          if [ "$FAILED" -gt 0 ]; then
+            exit 1
+          fi
+
+      - name: Assert the command pump really landed
+        run: |
+          f=/tmp/engine/components/sdlutil/sdlinputwrapper.cpp
+          if grep -q "drainCompanionCommands();" "$f"; then
+            echo "PUMP CALL PRESENT"; grep -n "drainCompanionCommands" "$f"
+          else
+            echo "::error::components/sdlutil/sdlinputwrapper.cpp never calls drainCompanionCommands() — every companion command from the bottom screen is dropped"
+            exit 1
+          fi
