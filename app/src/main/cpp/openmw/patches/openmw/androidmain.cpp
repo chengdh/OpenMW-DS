@@ -459,9 +459,12 @@ void drainCompanionCommands()
         if (g_commandQueue.empty()) return;
         pending.swap(g_commandQueue);
     }
+    // Logged outside the lock: the disk sink must never be touched while g_commandMutex is held.
+    Log(Debug::Info) << "CMDQ_DRAIN n=" << pending.size() << " first=" << pending.front();
 
     for (auto& cmd : pending)
     {
+        Log(Debug::Info) << "CMDQ_CMD lua=" << (lua ? "yes" : "no") << " cmd=" << cmd;
         // Dialogue commands (CMPDLG:) are handled natively — Lua has no way to read the
         // filtered topic list or select a topic. Everything else goes to Lua as before.
         if (cmd.rfind("CMPDLG:topic:", 0) == 0)
@@ -1033,6 +1036,9 @@ Java_org_openmw_EngineActivity_sendCompanionCommand(JNIEnv* env, jclass /*cls*/,
     {
         std::lock_guard<std::mutex> lock(g_commandMutex);
         g_commandQueue.push_back(std::string(raw));
+        // Not COMPANION_-prefixed: companion lines are filtered out of openmw.log, and this
+        // trace has to be readable from adb. See companion-skip-disk-log.patch.
+        Log(Debug::Info) << "CMDQ_PUSH n=" << g_commandQueue.size() << " cmd=" << raw;
     }
     env->ReleaseStringUTFChars(jcmd, raw);
 }
