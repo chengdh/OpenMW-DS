@@ -26,7 +26,7 @@
  #include <MyGUI_FactoryManager.h>
  #include <MyGUI_InputManager.h>
  #include <MyGUI_LanguageManager.h>
-@@ -2067,7 +2069,135 @@
+@@ -2067,7 +2069,154 @@
      {
          MyGUI::InputManager::getInstance().setKeyFocusWidget(widget);
          onKeyFocusChanged(widget);
@@ -73,9 +73,28 @@
 +    // symbol is reachable from androidmain.cpp without a header (C linkage ignores the namespace).
 +    extern "C" void companionSetFocusedText(const char* utf8)
 +    {
-+        if (!gCompanionTextInput || !utf8)
++        if (!utf8)
 +            return;
++        // COMPANION FIX: onKeyFocusChanged is not always called when a modal dialog
++        // (character name, class name, save name) focuses its EditBox - MyGUI's own
++        // KeyboardNavigation can set focus directly through InputManager, bypassing
++        // WindowManager::setKeyFocusWidget. gCompanionTextInput then stays null and the
++        // panel's confirmed text was silently dropped (the field stayed empty). Query the
++        // live key-focus widget here at submit time as a fallback so text always lands in
++        // the field that is actually focused right now.
++        MyGUI::Widget* focusWidget = MyGUI::InputManager::getInstance().getKeyFocusWidget();
++        MyGUI::EditBox* focusedEdit
++            = focusWidget ? focusWidget->castType<MyGUI::EditBox>(false) : nullptr;
++        if (focusedEdit && !focusedEdit->getEditReadOnly() && !focusedEdit->getEditStatic()
++            && !focusedEdit->castType<Gui::NumericEditBox>(false))
++            gCompanionTextInput = focusedEdit;
++        if (!gCompanionTextInput)
++        {
++            Log(Debug::Warn) << "COMPANION_TEXT_INPUT_NO_FOCUS: CMPTEXT:set ignored, no focused EditBox";
++            return;
++        }
 +        MyGUI::EditBox* field = gCompanionTextInput;
++        Log(Debug::Info) << "COMPANION_TEXT_INPUT_SET:" << utf8;
 +        field->setCaption(MyGUI::UString(utf8));
 +
 +        // A MULTI-LINE field (the class-description box) takes Return as a literal newline, so
