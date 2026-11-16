@@ -413,8 +413,14 @@ static void exportTopics()
 // Called from InputWrapper::capture() every frame on the engine thread.
 void drainCompanionCommands()
 {
+    // COMPANION FIX: this used to return here whenever the LuaManager had not been cached yet,
+    // i.e. until the first COMPANION_STATS export. Character generation (name / class / save-name
+    // entry) runs BEFORE any stats exist, so the whole queue -- including the bottom-screen
+    // keyboard's CMPTEXT:set:<text> -- was silently thrown away and the field stayed empty.
+    // Only the commands that are forwarded to Lua actually need the pointer; every native branch
+    // below (text input, dialogue, barter, repair, quests, topics) works without it, and the
+    // per-frame polls further down must run regardless.
     MWBase::LuaManager* lua = g_luaManagerPtr.load(std::memory_order_acquire);
-    if (!lua) return;
 
     // Per-frame poll for the pending "make the map the active controller window" request set by
     // CMP:openmap below. The Lua AddUiMode that opens the map is deferred, so GM_Inventory is not
@@ -930,11 +936,20 @@ void drainCompanionCommands()
             // poll at the top of this function consumes it; the map-only-signature guard there makes
             // it safe on a close toggle or a char-gen-suppressed open (a later native open clears it).
             g_companionPendingMapActive.store(true, std::memory_order_relaxed);
-            lua->handleConsoleCommand("Companion", cmd, MWWorld::Ptr());
+            if (lua)
+                lua->handleConsoleCommand("Companion", cmd, MWWorld::Ptr());
+            else
+                Log(Debug::Warning) << "COMPANION_CMD_NO_LUA: dropped " << cmd;
         }
         else
         {
-            lua->handleConsoleCommand("Companion", cmd, MWWorld::Ptr());
+            // Lua-backed command (Developer Tools, AddUiMode requests, ...) with no LuaManager
+            // cached yet: drop it rather than dereference a null pointer. Before the fix above
+            // this case could not be reached at all, because the whole drain bailed out first.
+            if (lua)
+                lua->handleConsoleCommand("Companion", cmd, MWWorld::Ptr());
+            else
+                Log(Debug::Warning) << "COMPANION_CMD_NO_LUA: dropped " << cmd;
         }
     }
 }
