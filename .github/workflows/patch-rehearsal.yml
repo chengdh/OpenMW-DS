@@ -32,18 +32,17 @@ jobs:
       - name: Byte-level probe of the pump target
         run: |
           f=/tmp/engine/components/sdlutil/sdlinputwrapper.cpp
-          echo "--- lines 1..8 ---"
-          sed -n '1,8p' "$f" | od -c | head -20
-          echo "--- lines 52..62 ---"
-          sed -n '52,62p' "$f" | od -c | head -30
           echo "--- apply with --ignore-whitespace ---"
-          cp -R /tmp/engine /tmp/engine_l
+          rm -rf /tmp/engine_l && cp -R /tmp/engine /tmp/engine_l
           cd /tmp/engine_l
           patch -d . -p1 -t -N -l < "$GITHUB_WORKSPACE/app/src/main/cpp/openmw/patches/openmw/companion-command-pump.patch" 2>&1 | sed 's/^/    /'
-          echo "--- apply with -l -F3 ---"
-          cp -R /tmp/engine /tmp/engine_f
-          cd /tmp/engine_f
-          patch -d . -p1 -t -N -l -F3 < "$GITHUB_WORKSPACE/app/src/main/cpp/openmw/patches/openmw/companion-command-pump.patch" 2>&1 | sed 's/^/    /'
+          echo "--- the patch this runner generates ---"
+          cd /tmp/engine
+          cp components/sdlutil/sdlinputwrapper.cpp /tmp/orig.cpp
+          python3 -c 'p="components/sdlutil/sdlinputwrapper.cpp"; s=open(p).read(); o="    void InputWrapper::capture(bool windowEventsOnly)\n    {\n"; assert o in s; open(p,"w").write(s.replace(o, o+"#ifdef __ANDROID__\n        drainCompanionCommands();\n#endif\n\n",1))'
+          diff -u /tmp/orig.cpp components/sdlutil/sdlinputwrapper.cpp | sed 's|^--- /tmp/orig.cpp.*|--- a/components/sdlutil/sdlinputwrapper.cpp|; s|^+++ components.*|+++ b/components/sdlutil/sdlinputwrapper.cpp|' || true
+          echo "--- generated patch applied to a clean tree ---"
+          cp /tmp/orig.cpp components/sdlutil/sdlinputwrapper.cpp
 
       - name: Replay the patch chain
         run: |
