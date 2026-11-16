@@ -12,6 +12,7 @@ on:
       - '**/*.md'
       - .github/workflows/build-cjk-apk.yml
       - .github/workflows/hybrid-apk.yml
+          - '.github/workflows/patch-rehearsal.yml'
   workflow_dispatch:
 
 permissions:

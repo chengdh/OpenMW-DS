@@ -8,6 +8,9 @@ name: Patch rehearsal
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/patch-rehearsal.yml'
 
 jobs:
   rehearsal:
