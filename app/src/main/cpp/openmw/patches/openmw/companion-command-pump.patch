@@ -9,14 +9,14 @@
 +#endif
 +
  #include <osgViewer/Viewer>
-@@ -55,6 +59,10 @@
+@@ -53,6 +53,10 @@
+ 
+     void InputWrapper::capture(bool windowEventsOnly)
      {
-         mViewer->getEventQueue()->frame(0.f);
- 
-         SDL_PumpEvents();
- 
 +#ifdef __ANDROID__
 +        drainCompanionCommands();
 +#endif
 +
-         SDL_Event evt;
+         mViewer->getEventQueue()->frame(0.f);
+ 
+         SDL_PumpEvents();
