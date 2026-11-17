@@ -18,10 +18,55 @@ which is itself a fork of the **[openmw-android](#credits)** project, which buil
 
 If you don't have a Thor, or don't care about dual-screen Morrowind, you probably want **[Alpha3](#credits)** instead.
 
+> **This branch (`chinese-gbk-support`)** adds Simplified Chinese support for the `tes3cn` Morrowind localisations
+> and fixes bottom-screen text input. See [Chinese (GBK) support on this branch](#chinese-gbk-support-on-this-branch)
+> below.
+
 ![Image of the HUD tab in game](outputs/OpenMW-DS%20Thumnail.jpg)
 > Image is more blurry than in real life.
 
 OpenMW-DS will always be free, but if you've enjoyed it and want to shout me a hot chocolate, it's much appreciated: [ko-fi.com/joshd0](https://ko-fi.com/joshd0)
+
+---
+## Chinese (GBK) support on this branch
+
+`chinese-gbk-support` is this fork's default branch. It is upstream OpenMW-DS plus a Chinese-localisation layer and a
+few fixes, aimed at people playing the community `tes3cn_*.esp` Simplified Chinese translation of Morrowind. Gameplay
+rules are untouched — the changes are in encoding conversion, fonts, bottom-screen input and build tooling.
+
+### What changed
+
+- **GBK / UTF-8 data-file encoding.** `patches/openmw/cjk-encoding-support.patch` extends the engine's `toutf8`
+  converter with two new encodings: `gbk` (CP936, decoded via Android's ICU with a libiconv fallback on desktop) for
+  the classic GBK `tes3cn_*.esp` plugins, and `utf8` (pass-through) for UTF-8 variants such as those from
+  amazingfate/tes3-chinese-translation. Set `encoding=gbk` in `openmw.cfg`, or use Settings > Encoding in the launcher.
+  On a target with neither ICU nor iconv, build with `-DOPENMW_CJK_NO_ICONV` so GBK passes bytes through unchanged
+  instead of failing to link.
+- **Bundled Chinese font.** `cjk-fonts/` ships LXGW WenKai GB (SIL Open Font License 1.1) and a `zh_CN.omwfont` MyGUI
+  definition covering code points 33–65535. `app/openmw.cfg` enables it with `fallback=Fonts_Font_0,zh_CN`; remove that
+  line to keep the original bitmap font. Details and the full encoding table are in
+  [`cjk-fonts/README.md`](app/src/main/cpp/openmw/cjk-fonts/README.md).
+- **Bottom-screen text input fixed.** The companion keyboard now delivers typed text to the game's focused text field
+  (e.g. the character-naming dialog) reliably: `companion-text-input-export.patch` writes to the live MyGUI key-focus
+  widget, `companion-command-pump.patch` drains the companion command queue every frame, and `androidmain.cpp` defers
+  the interior-brightness apply until a player exists so the now-active pump cannot crash startup. Verified on device:
+  typing a name on the bottom screen and pressing Enter updates the top-screen field.
+- **Build and CI tooling.** Three workflows under `.github/workflows/`: `build-cjk-apk.yml` builds the patched engine
+  from source, `hybrid-apk.yml` swaps that engine into the current upstream release APK for a fast smoke test, and
+  `patch-rehearsal.yml` dry-runs the whole engine patch chain against the pinned OpenMW version to catch rejected
+  hunks early — a silently failing patch was the root cause of the text-input bug. Both APK workflows restore
+  CMake-generated engine assets that AGP can drop and re-sign with a cached debug keystore so builds install as
+  updates.
+
+### How to use it
+
+1. Install the `tes3cn_*.esp` plugins alongside your Morrowind `Data Files` and enable them in `openmw.cfg` as usual.
+2. Add `encoding=gbk` to `openmw.cfg` (or pick it in Settings > Encoding). Use `encoding=utf8` for UTF-8 content files.
+3. Install an APK from the branch's CI (or build locally), then launch the game once so the bundled font and resources
+   are unpacked to `/storage/emulated/0/OpenMW-DS/resources`.
+
+On-device verification notes, the packaging caveat and the exact encoding table live in
+[`cjk-fonts/README.md`](app/src/main/cpp/openmw/cjk-fonts/README.md).
 
 ---
 ## Features
