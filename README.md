@@ -51,6 +51,15 @@ rules are untouched — the changes are in encoding conversion, fonts, bottom-sc
   widget, `companion-command-pump.patch` drains the companion command queue every frame, and `androidmain.cpp` defers
   the interior-brightness apply until a player exists so the now-active pump cannot crash startup. Verified on device:
   typing a name on the bottom screen and pressing Enter updates the top-screen field.
+- **Long Chinese text wraps instead of being clipped.** MyGUI 3.4.3's `TextView` only broke a line at a space/tab
+  roll-back point, and Chinese has no spaces, so a paragraph was laid out as one endless line that ran past the
+  widget and was clipped — the tail of long book pages, notes and dialogue silently vanished. This is why a note
+  could stop mid-sentence while the signature further down still rendered. `patches/mygui/cjk-linebreak.patch`
+  breaks as soon as the width is exceeded and, with no space to roll back to, starts the next line at the current
+  glyph rather than dropping it. Once text actually wraps, long notes really do span pages, so
+  `patches/openmw/cjk-book-pagination.patch` also makes `TextElement::pageSplit()` use the measured line height
+  (rendered text height divided by line count) instead of `Settings::gui().mFontSize`, which is roughly half the
+  real height of the bundled TrueType font and used to slice a line across two pages.
 - **Build and CI tooling.** Three workflows under `.github/workflows/`: `build-cjk-apk.yml` builds the patched engine
   from source, `hybrid-apk.yml` swaps that engine into the current upstream release APK for a fast smoke test, and
   `patch-rehearsal.yml` dry-runs the whole engine patch chain against the pinned OpenMW version to catch rejected
