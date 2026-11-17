@@ -1,0 +1,41 @@
+--- a/apps/openmw/mwgui/formatting.cpp
++++ b/apps/openmw/mwgui/formatting.cpp
+@@ -501,17 +501,33 @@
+ 
+     int TextElement::pageSplit()
+     {
+-        // split lines
+-        const int lineHeight = Settings::gui().mFontSize;
++        const MyGUI::VectorLineInfo& lines = mEditBox->getSubWidgetText()->castType<MyGUI::EditText>()->getLineInfo();
++
++        // Vanilla used Settings::gui().mFontSize as the line height, which is only correct
++        // for bitmap fonts where the font size *is* the line height. A TrueType font (the
++        // bundled zh_CN / LXGW WenKai GB) draws taller lines - about twice the font size
++        // here, once bookScale and the Android scaling factor are applied - so a page break
++        // was computed in the middle of a line and sliced that line across the two pages.
++        // Measure the real advance instead: TextView accounts one font height per line, so
++        // the text height divided by the line count is exactly the line height.
++        int lineHeight = Settings::gui().mFontSize;
++        if (!lines.empty())
++        {
++            const int measured = getHeight() / static_cast<int>(lines.size());
++            if (measured > 0)
++                lineHeight = measured;
++        }
++        if (lineHeight < 1)
++            lineHeight = 1;
++
++        // split lines
+         unsigned int lastLine = (mPaginator.getStartTop() + mPaginator.getPageHeight() - mPaginator.getCurrentTop());
+-        if (lineHeight > 0)
+-            lastLine /= lineHeight;
++        lastLine /= lineHeight;
+         int ret = mPaginator.getCurrentTop() + lastLine * lineHeight;
+ 
+         // first empty lines that would go to the next page should be ignored
+         mPaginator.setIgnoreLeadingEmptyLines(true);
+ 
+-        const MyGUI::VectorLineInfo& lines = mEditBox->getSubWidgetText()->castType<MyGUI::EditText>()->getLineInfo();
+         for (size_t i = lastLine; i < lines.size(); ++i)
+         {
+             if (lines[i].width == 0)
