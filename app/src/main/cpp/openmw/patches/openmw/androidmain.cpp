@@ -170,6 +170,12 @@ static std::atomic<bool> g_companionResetAxes{ false };
 // thread only (drainCompanionCommands), atomic for consistency with the sibling flags.
 static std::atomic<bool> g_companionPendingMapActive{ false };
 
+// Cached once the first COMPANION_STATS line arrives. Besides gating Lua console commands, this
+// is also our "engine has a live player/world" signal: stats are exported only after character
+// generation, so per-frame polls that reach into World must wait for it (see the brightness poll
+// below). Declared here rather than next to the command queue because that poll runs earlier.
+static std::atomic<MWBase::LuaManager*> g_luaManagerPtr{ nullptr };
+
 // Pending value for the engine's own `Shaders/minimum interior brightness` (the vanilla interior
 // ambient floor), pushed from the DS options slider. NEGATIVE = nothing pending.
 //
@@ -191,10 +197,21 @@ static void companionApplyPendingInteriorBrightness()
 
     Settings::shaders().mMinimumInteriorBrightness.set(v);
 
+    // World::processChangedSettings() reaches World::getPlayerPtr(), which dereferences
+    // mPlayer. During startup (including char-gen video/input frames) that pointer is still
+    // null. Now that the command pump runs every frame, applying this too early crashes the
+    // engine before the player exists. Put the value back and retry on a later frame.
+    MWBase::World* world = MWBase::Environment::get().getWorld();
+    if (!world || !g_luaManagerPtr.load(std::memory_order_acquire))
+    {
+        g_companionPendingInteriorBrightness.store(v, std::memory_order_relaxed);
+        return;
+    }
+
     // Consume ONLY our own key. resetPendingChanges() with no argument clears the whole pending
     // set, which would swallow an unrelated change some other system had queued and not yet seen.
     const Settings::CategorySettingVector ours{ { "Shaders", "minimum interior brightness" } };
-    MWBase::Environment::get().getWorld()->processChangedSettings(ours);
+    world->processChangedSettings(ours);
     Settings::Manager::resetPendingChanges(ours);
 }
 
@@ -205,7 +222,6 @@ static void companionApplyPendingInteriorBrightness()
 
 static std::deque<std::string>         g_commandQueue;
 static std::mutex                      g_commandMutex;
-static std::atomic<MWBase::LuaManager*> g_luaManagerPtr{nullptr};
 
 // Companion dialogue selection bridges (defined in mwgui/dialogue.cpp). Safe to
 // call here because drainCompanionCommands() runs on the engine main thread.
