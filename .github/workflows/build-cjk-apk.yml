@@ -157,6 +157,16 @@ jobs:
             exit 1
           fi
           echo "CJK TOPIC LINKS APPLIED"
+          # cjk-typesetter-linebreak.patch: the book/dialogue typesetter only breaks in
+          # front of a whole word, and a Chinese paragraph is one word, so it used to be
+          # laid out as a single line running far past the page edge.
+          BP=$(find -L "$CXX_SRC" -name bookpage.cpp -path "*mwgui*" 2>/dev/null | head -1)
+          echo "book typesetter source: ${BP:-<not found>}"
+          if [ -z "$BP" ] || ! grep -q "cjkBreakAllowed" "$BP"; then
+            echo "::error::cjk-typesetter-linebreak.patch did not apply - long Chinese book and dialogue text will again overflow the page instead of wrapping"
+            exit 1
+          fi
+          echo "CJK TYPESETTER LINE BREAKING APPLIED"
           ls -la /mnt/work/build/generated_assets/libopenmw 2>/dev/null | head
           echo "generated engine assets: $(find /mnt/work/build/generated_assets -type f 2>/dev/null | wc -l) files"
           df -h /

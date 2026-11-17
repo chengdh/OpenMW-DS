@@ -821,7 +821,11 @@ set(OPENMW_PATCH
 	# CJK topic links: without this the dialogue topic list is empty for Chinese,
 	# because no keyword inside a spaceless CJK sentence is ever recognised as a
 	# link, so the player can never learn a topic. Verified post-build.
-	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-topic-links.patch || true
+	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-topic-links.patch || true &&
+	# CJK line breaking in the book/dialogue typesetter: it can only break in front
+	# of a whole word, and a Chinese paragraph is one word, so it was emitted as a
+	# single line running far past the page edge. Verified post-build.
+	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-typesetter-linebreak.patch || true
 )
 
 if(OPENMW_SRC)

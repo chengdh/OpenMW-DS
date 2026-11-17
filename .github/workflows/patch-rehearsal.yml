@@ -120,6 +120,16 @@ jobs:
             exit 1
           fi
 
+      - name: Assert CJK typesetter line breaking landed
+        run: |
+          f=/tmp/engine/apps/openmw/mwgui/bookpage.cpp
+          if grep -q "cjkBreakAllowed" "$f"; then
+            echo "CJK TYPESETTER LINE BREAKING PRESENT"; grep -n "cjkBreakAllowed" "$f" | head -5
+          else
+            echo "::error::bookpage.cpp still only breaks in front of a whole word — a spaceless CJK paragraph is one word, so book and dialogue text is laid out as a single line running past the page edge"
+            exit 1
+          fi
+
       - name: Replay the MyGUI patch set
         run: |
           set -o pipefail

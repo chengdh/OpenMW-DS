@@ -51,15 +51,19 @@ rules are untouched — the changes are in encoding conversion, fonts, bottom-sc
   widget, `companion-command-pump.patch` drains the companion command queue every frame, and `androidmain.cpp` defers
   the interior-brightness apply until a player exists so the now-active pump cannot crash startup. Verified on device:
   typing a name on the bottom screen and pressing Enter updates the top-screen field.
-- **Long Chinese text wraps instead of being clipped.** MyGUI 3.4.3's `TextView` only broke a line at a space/tab
-  roll-back point, and Chinese has no spaces, so a paragraph was laid out as one endless line that ran past the
-  widget and was clipped — the tail of long book pages, notes and dialogue silently vanished. This is why a note
-  could stop mid-sentence while the signature further down still rendered. `patches/mygui/cjk-linebreak.patch`
-  breaks as soon as the width is exceeded and, with no space to roll back to, starts the next line at the current
-  glyph rather than dropping it. Once text actually wraps, long notes really do span pages, so
-  `patches/openmw/cjk-book-pagination.patch` also makes `TextElement::pageSplit()` use the measured line height
-  (rendered text height divided by line count) instead of `Settings::gui().mFontSize`, which is roughly half the
-  real height of the bundled TrueType font and used to slice a line across two pages.
+- **Long Chinese text wraps instead of being clipped.** Books, notes, scrolls and the conversation history are laid
+  out by OpenMW's own typesetter (`apps/openmw/mwgui/bookpage.cpp`), not by MyGUI, and it could only break a line in
+  front of a whole word: it accumulates one "partial word" and moves it down when it does not fit. Chinese has no
+  spaces, so a paragraph arrives as a single word and was emitted as one line whose right edge ran far past the page
+  — the reader saw an unbroken line cut off at the edge of the paper, and everything past it was unreachable. That
+  is why a note stopped mid-sentence while the signature further down still rendered.
+  `patches/openmw/cjk-typesetter-linebreak.patch` teaches the typesetter to break inside such a word, between two
+  CJK characters, with the usual "no break before closing punctuation" rule, and leaves Latin words alone so their
+  word-wrapping is unchanged. Two related fixes travel with it: `patches/mygui/cjk-linebreak.patch` does the same for
+  MyGUI's `TextView` (tooltips and other `EditBox`/`StaticText` text, which only broke at a space/tab roll-back
+  point), and `patches/openmw/cjk-book-pagination.patch` makes `TextElement::pageSplit()` use the measured line
+  height (rendered text height divided by line count) instead of `Settings::gui().mFontSize`, which is roughly half
+  the real height of the bundled TrueType font and used to slice a line across two pages.
 - **Dialogue topics can be learned again.** The conversation list only offers topics the player already knows, and a
   topic is learned when its name appears in an NPC reply (`addTopicsFromText` → `parseTopicIdsFromText` →
   `KeywordSearch::parseHyperText`, the same pass that underlines the clickable link). That check only accepted a match

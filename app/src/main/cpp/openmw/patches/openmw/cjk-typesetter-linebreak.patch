@@ -1,0 +1,184 @@
+--- a/apps/openmw/mwgui/bookpage.cpp
++++ b/apps/openmw/mwgui/bookpage.cpp
+@@ -73,6 +73,53 @@
+     // No-break spaces (0x00A0, 0x202F, 0xFEFF - normal, narrow, zero width)
+     // are ignored here for obvious reasons
+     // Figure space (0x2007) is not a breaking space either
++    // CJK fix: scripts that do not separate words with spaces must be allowed to break a
++    // line between two characters. These ranges cover the ideographic scripts: CJK radicals
++    // through Yi, kana, Hangul, compatibility ideographs, fullwidth forms and the SMP
++    // ideograph planes. Latin, Cyrillic, Greek and friends stay out, so ordinary prose keeps
++    // breaking at word boundaries exactly as before.
++    bool ucsCjk(Utf8Stream::UnicodeChar codePoint)
++    {
++        return (codePoint >= 0x1100 && codePoint <= 0x115F)      // Hangul Jamo
++            || (codePoint >= 0x2E80 && codePoint <= 0xA4CF)      // CJK radicals, kana, ideographs, Yi
++            || (codePoint >= 0xAC00 && codePoint <= 0xD7A3)      // Hangul syllables
++            || (codePoint >= 0xF900 && codePoint <= 0xFAFF)      // CJK compatibility ideographs
++            || (codePoint >= 0xFE30 && codePoint <= 0xFE6F)      // CJK compatibility forms
++            || (codePoint >= 0xFF00 && codePoint <= 0xFF60)      // fullwidth forms
++            || (codePoint >= 0xFFE0 && codePoint <= 0xFFE6)      // fullwidth signs
++            || (codePoint >= 0x20000 && codePoint <= 0x3FFFD);   // ideograph extensions
++    }
++
++    // Characters that must never start a line (the usual CJK "no break before" set): closing
++    // punctuation, closing brackets, quotes, ellipsis and the prolonged sound mark.
++    bool ucsNoBreakBefore(Utf8Stream::UnicodeChar codePoint)
++    {
++        switch (codePoint)
++        {
++            case 0x3001: case 0x3002:                            // 、。
++            case 0xFF0C: case 0xFF0E:                            // ，．
++            case 0xFF01: case 0xFF1F:                            // ！？
++            case 0xFF1A: case 0xFF1B:                            // ：；
++            case 0xFF09: case 0xFF3D: case 0xFF5D:               // ）］｝
++            case 0x3009: case 0x300B: case 0x300D: case 0x300F:  // 〉》」』
++            case 0x3011: case 0x3015: case 0x3017:               // 】〕〗
++            case 0x201D: case 0x2019:                            // ”’
++            case 0x2026: case 0x30FC:                            // …ー
++                return true;
++            default:
++                return false;
++        }
++    }
++
++    // A legal intra-word line break: at least one side is ideographic, and the character that
++    // would start the new line is not one of the forbidden ones above.
++    bool cjkBreakAllowed(Utf8Stream::UnicodeChar previous, Utf8Stream::UnicodeChar next)
++    {
++        if (!ucsCjk(previous) && !ucsCjk(next))
++            return false;
++        return !ucsNoBreakBefore(next);
++    }
++
+     bool ucsBreakingSpace(int codePoint)
+     {
+         switch (codePoint)
+@@ -623,7 +670,72 @@
+                     mPartialWhitespace.emplace_back(style, lead, origin, spaceWidth);
+                 if (origin != extent)
+                     mPartialWord.emplace_back(style, origin, extent, wordWidth);
++            }
++        }
++
++        // CJK fix: can this word be broken up at all? A run of Latin letters cannot, and must
++        // keep moving to the next line as a whole the way it always did.
++        bool hasBreakOpportunityInside(const PartialText& partialText) const
++        {
++            Utf8Stream stream(partialText.mBegin, partialText.mEnd);
++            if (stream.eof())
++                return false;
++
++            Utf8Stream::UnicodeChar previous = stream.consume();
++            while (!stream.eof())
++            {
++                const Utf8Stream::UnicodeChar codePoint = stream.consume();
++                if (cjkBreakAllowed(previous, codePoint))
++                    return true;
++                previous = codePoint;
++            }
++            return false;
++        }
++
++        // Lays out one partial word, filling the current line and starting a new one whenever the
++        // next glyph would cross the page edge. `left` is the x the word starts at and ends up at
++        // the right edge of whatever landed on the last line.
++        void appendWordSplit(const PartialText& partialText, int& left, int fontHeight)
++        {
++            Utf8Stream stream(partialText.mBegin, partialText.mEnd);
++            Utf8Stream::Point pieceBegin = stream.current();
++            int pieceWidth = 0;
++            int pieceChars = 0;
++            Utf8Stream::UnicodeChar previous = 0;
++
++            while (!stream.eof())
++            {
++                const Utf8Stream::Point before = stream.current();
++                const Utf8Stream::UnicodeChar codePoint = stream.consume();
++                const std::optional<MyGUI::GlyphInfo> info = getGlyphInfo(partialText.mStyle->mFont, codePoint);
++                const int advance = info ? static_cast<int>(info->advance + info->bearingX) : 0;
++
++                if (pieceChars > 0 && (left + pieceWidth + advance) > mPageWidth
++                    && cjkBreakAllowed(previous, codePoint))
++                {
++                    const int top = mLine ? mLine->mRect.top : mBook->mRect.bottom;
++                    appendRun(partialText.mStyle, pieceBegin, before, pieceChars, left + pieceWidth, top + fontHeight);
++
++                    // Start the rest on a fresh line: appendRun only opens one when mLine is null.
++                    mLine = nullptr;
++                    mRun = nullptr;
++                    left = 0;
++                    pieceBegin = before;
++                    pieceWidth = 0;
++                    pieceChars = 0;
++                }
++
++                pieceWidth += advance;
++                ++pieceChars;
++                previous = codePoint;
+             }
++
++            if (pieceChars > 0)
++            {
++                const int top = mLine ? mLine->mRect.top : mBook->mRect.bottom;
++                appendRun(
++                    partialText.mStyle, pieceBegin, stream.current(), pieceChars, left + pieceWidth, top + fontHeight);
++            }
+         }
+ 
+         void add_partial_text()
+@@ -642,8 +754,30 @@
+ 
+             int left = mLine ? mLine->mRect.right : 0;
+ 
+-            if (left + spaceWidth + wordWidth > mPageWidth)
++            // CJK fix: Chinese, Japanese and Korean do not separate words with spaces, so
++            // writeImpl hands the whole paragraph over as a single "word". Upstream can only
++            // break in front of a word, and a paragraph that does not fit therefore came out as
++            // ONE line whose right edge ran far past mPageWidth - the reader saw a single endless
++            // line cut off at the edge of the paper, with the rest of the text unreachable. When
++            // the word can be broken inside (see cjkBreakAllowed), fill the current line with as
++            // much of it as fits and continue on the next one instead of moving it wholesale.
++            const bool fitsAsWhole = (left + spaceWidth + wordWidth <= mPageWidth);
++
++            bool anyWordSplittable = false;
++            if (!fitsAsWhole)
+             {
++                for (const PartialText& partialText : mPartialWord)
++                {
++                    if (hasBreakOpportunityInside(partialText))
++                    {
++                        anyWordSplittable = true;
++                        break;
++                    }
++                }
++            }
++
++            if (!fitsAsWhole && !anyWordSplittable)
++            {
+                 mLine = nullptr;
+                 mRun = nullptr;
+                 left = 0;
+@@ -663,6 +797,22 @@
+ 
+             for (const PartialText& partialText : mPartialWord)
+             {
++                if (hasBreakOpportunityInside(partialText) && (left + partialText.mWidth > mPageWidth))
++                {
++                    appendWordSplit(partialText, left, fontHeight);
++                    if (mLine != nullptr)
++                        left = mLine->mRect.right;
++                    continue;
++                }
++
++                if (left + partialText.mWidth > mPageWidth && left > 0)
++                {
++                    // Whole word wider than the space left on this line: move it down, as before.
++                    mLine = nullptr;
++                    mRun = nullptr;
++                    left = 0;
++                }
++
+                 int top = mLine ? mLine->mRect.top : mBook->mRect.bottom;
+                 const int numChars = static_cast<int>(partialText.mEnd - partialText.mBegin);
+                 appendRun(partialText.mStyle, partialText.mBegin, partialText.mEnd, numChars, left + partialText.mWidth,
