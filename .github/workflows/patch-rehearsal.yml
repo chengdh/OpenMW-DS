@@ -137,7 +137,10 @@ jobs:
       - name: Assert CJK line breaking landed
         run: |
           f=/tmp/mygui/MyGUIEngine/src/MyGUI_TextView.cpp
-          if grep -q "no break opportunity" "$f"; then
+          # Assert on the real code change, not on a comment: the wrap condition must
+          # no longer require a roll back point, and the no-rollback branch must exist.
+          if grep -q "count > 0 && (width + char_fullAdvance) > _maxWidth" "$f" \
+             && grep -q -A2 "if (!roll_back.empty())" "$f"; then
             echo "CJK LINE BREAK PRESENT"; grep -n "width + char_fullAdvance" "$f"
           else
             echo "::error::MyGUI TextView still refuses to break a line that has no space — long Chinese paragraphs will be clipped at the widget edge"

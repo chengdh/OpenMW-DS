@@ -450,6 +450,15 @@ ExternalProject_Add(mygui
 	PATCH_COMMAND sed -i -e "s/unicode_char = uint32/unicode_char = char32_t/g" <SOURCE_DIR>/MyGUIEngine/include/MyGUI_UString.h
 	COMMAND sed -i -e "s/code_point = uint16/code_point = char16_t/g" <SOURCE_DIR>/MyGUIEngine/include/MyGUI_UString.h
 
+	# CJK line breaking. MyGUI 3.4.3 only wraps a line at a space/tab roll back point,
+	# so any paragraph without spaces (Chinese, Japanese, Korean) was laid out as a single
+	# endless line, ran past the widget and got clipped: all book/dialogue text after the
+	# first screen width was lost. Applied without `|| true` on purpose - a silently
+	# rejected patch is exactly how the companion command pump broke before.
+	# -i instead of shell redirection so this works no matter how the step is executed.
+	COMMAND patch -d <SOURCE_DIR> -p1 -t -N -i ${CMAKE_SOURCE_DIR}/openmw/patches/mygui/cjk-linebreak.patch
+	COMMAND grep -q "CJK fix: Chinese/Japanese/Korean" <SOURCE_DIR>/MyGUIEngine/src/MyGUI_TextView.cpp
+
 	CONFIGURE_COMMAND ${wrapper_command} cmake <SOURCE_DIR>
 	${COMMON_CMAKE_ARGS}
 	-DMYGUI_RENDERSYSTEM=1
