@@ -1,0 +1,34 @@
+--- a/MyGUIEngine/src/MyGUI_TextView.cpp
++++ b/MyGUIEngine/src/MyGUI_TextView.cpp
+@@ -222,13 +222,25 @@
+ 			float char_fullAdvance = char_bearingX + char_advance;
+ 
+ 			// перенос слов
+-			if (_maxWidth != -1 && (width + char_fullAdvance) > _maxWidth && !roll_back.empty())
++			// CJK fix: Chinese/Japanese/Korean text has no spaces, so a line can contain no
++			// roll back point at all. The original condition required roll_back to be set,
++			// which meant such a paragraph was laid out as one endless line that ran past
++			// the widget and was clipped - every character after the first screen width was
++			// silently lost (books, dialogue, any long CJK string). Break the line as soon
++			// as the width is exceeded; when there is no space to roll back to, break right
++			// before the current glyph so it starts the next line instead of being dropped.
++			if (_maxWidth != -1 && count > 0 && (width + char_fullAdvance) > _maxWidth)
+ 			{
+-				// откатываем до последнего пробела
+-				width = roll_back.getWidth();
+-				count = roll_back.getCount();
+-				index = roll_back.getTextIter();
+-				line_info.symbols.erase(line_info.symbols.begin() + roll_back.getPosition(), line_info.symbols.end());
++				if (!roll_back.empty())
++				{
++					// откатываем до последнего пробела
++					width = roll_back.getWidth();
++					count = roll_back.getCount();
++					index = roll_back.getTextIter();
++					line_info.symbols.erase(line_info.symbols.begin() + roll_back.getPosition(), line_info.symbols.end());
++				}
++				else
++					--index;
+ 
+ 				// запоминаем место отката, как полную строку
+ 				line_info.width = (int)std::ceil(width);

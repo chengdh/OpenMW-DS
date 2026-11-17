@@ -12,6 +12,7 @@ on:
     paths:
       - '.github/workflows/patch-rehearsal.yml'
       - 'app/src/main/cpp/openmw/patches/openmw/**.patch'
+      - 'app/src/main/cpp/openmw/patches/mygui/**.patch'
       - 'app/src/main/cpp/openmw/CMakeLists.txt'
 
 jobs:
@@ -106,5 +107,39 @@ jobs:
             echo "PUMP CALL PRESENT"; grep -n "drainCompanionCommands" "$f"
           else
             echo "::error::components/sdlutil/sdlinputwrapper.cpp never calls drainCompanionCommands() — every companion command from the bottom screen is dropped"
+            exit 1
+          fi
+
+      - name: Replay the MyGUI patch set
+        run: |
+          set -o pipefail
+          VER=$(grep -oE 'MYGUI_VERSION [0-9.]+' app/src/main/cpp/openmw/CMakeLists.txt | awk '{print $2}' | head -1)
+          echo "mygui version=$VER"
+          mkdir -p /tmp/mygui
+          curl -fsSL "https://github.com/MyGUI/mygui/archive/MyGUI${VER}.tar.gz" -o /tmp/mygui.tgz
+          tar -xzf /tmp/mygui.tgz -C /tmp/mygui --strip-components=1
+          echo "src files: $(find /tmp/mygui -type f | wc -l)"
+
+          FAILED=0
+          for p in app/src/main/cpp/openmw/patches/mygui/*.patch; do
+            [ -e "$p" ] || continue
+            name=$(basename "$p")
+            if (cd /tmp/mygui && patch -d . -p1 -t -N < "$GITHUB_WORKSPACE/$p"); then
+              echo "applied: $name"
+            else
+              FAILED=$((FAILED+1))
+              echo "::error::REJECTED: $name"
+            fi
+          done
+          echo "mygui rejected: $FAILED"
+          [ "$FAILED" -eq 0 ]
+
+      - name: Assert CJK line breaking landed
+        run: |
+          f=/tmp/mygui/MyGUIEngine/src/MyGUI_TextView.cpp
+          if grep -q "no break opportunity" "$f"; then
+            echo "CJK LINE BREAK PRESENT"; grep -n "width + char_fullAdvance" "$f"
+          else
+            echo "::error::MyGUI TextView still refuses to break a line that has no space — long Chinese paragraphs will be clipped at the widget edge"
             exit 1
           fi
