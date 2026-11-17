@@ -60,6 +60,15 @@ rules are untouched — the changes are in encoding conversion, fonts, bottom-sc
   `patches/openmw/cjk-book-pagination.patch` also makes `TextElement::pageSplit()` use the measured line height
   (rendered text height divided by line count) instead of `Settings::gui().mFontSize`, which is roughly half the
   real height of the bundled TrueType font and used to slice a line across two pages.
+- **Dialogue topics can be learned again.** The conversation list only offers topics the player already knows, and a
+  topic is learned when its name appears in an NPC reply (`addTopicsFromText` → `parseTopicIdsFromText` →
+  `KeywordSearch::parseHyperText`, the same pass that underlines the clickable link). That check only accepted a match
+  starting right after one of `"\n\r \t'\"(["`, and Chinese has no spaces: inside a Chinese sentence a topic name is
+  preceded by another ideograph, so every match failed. No topic was ever learned and the list stayed empty apart from
+  the hard-coded Persuasion and Goodbye rows, while replies lost their links. `patches/openmw/cjk-topic-links.patch`
+  accepts a preceding non-ASCII byte as a boundary too; the trie is byte-indexed, so a match starting mid-sequence
+  finds no child and fails at once rather than producing a bogus link. The bundled `tes3cn` plugins use no explicit
+  `@topic#` markup (zero occurrences), so nothing falls back to a working path — this patch is the only way through.
 - **Build and CI tooling.** Three workflows under `.github/workflows/`: `build-cjk-apk.yml` builds the patched engine
   from source, `hybrid-apk.yml` swaps that engine into the current upstream release APK for a fast smoke test, and
   `patch-rehearsal.yml` dry-runs the whole engine patch chain against the pinned OpenMW version to catch rejected
