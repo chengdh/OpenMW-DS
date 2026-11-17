@@ -1,0 +1,24 @@
+--- a/apps/openmw/mwdialogue/keywordsearch.cpp
++++ b/apps/openmw/mwdialogue/keywordsearch.cpp
+@@ -43,7 +43,20 @@
+                 Point prev = i;
+                 --prev;
+                 constexpr std::string_view wordSeparators = "\n\r \t'\"([";
+-                if (wordSeparators.find(*prev) == std::string_view::npos)
++                // CJK fix: a keyword only counts when the byte before it is a word
++                // separator. Chinese, Japanese and Korean have no spaces, so inside a
++                // CJK sentence a topic name is preceded by another ideograph and the
++                // check never passed: no topic in any dialogue line was ever turned
++                // into a link, the player could never learn a topic by clicking it,
++                // and the dialogue list stayed empty apart from the hard-coded rows
++                // (Persuasion / Goodbye). A UTF-8 continuation byte is >= 0x80, so
++                // treat a preceding non-ASCII byte as a valid boundary too. The trie
++                // is byte-indexed and a match started mid-sequence finds no child and
++                // fails immediately, so this cannot produce a bogus link.
++                const bool precededBySeparator
++                    = wordSeparators.find(*prev) != std::string_view::npos;
++                const bool precededByWideChar = static_cast<unsigned char>(*prev) >= 0x80;
++                if (!precededBySeparator && !precededByWideChar)
+                     continue;
+             }
+ 

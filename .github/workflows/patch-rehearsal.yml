@@ -110,6 +110,16 @@ jobs:
             exit 1
           fi
 
+      - name: Assert CJK topic links landed
+        run: |
+          f=/tmp/engine/apps/openmw/mwdialogue/keywordsearch.cpp
+          if grep -q "precededByWideChar" "$f"; then
+            echo "CJK TOPIC LINKS PRESENT"; grep -n "precededByWideChar" "$f"
+          else
+            echo "::error::keywordsearch.cpp still requires a space before a keyword — inside a spaceless CJK sentence no topic is ever a clickable link, so the dialogue topic list stays empty"
+            exit 1
+          fi
+
       - name: Replay the MyGUI patch set
         run: |
           set -o pipefail

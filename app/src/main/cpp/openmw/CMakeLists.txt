@@ -817,7 +817,11 @@ set(OPENMW_PATCH
 	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-settings-window-fit.patch || true &&
 	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/companion-quickkeys-snapshot.patch || true &&
 	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-encoding-support.patch || true &&
-	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-book-pagination.patch || true
+	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-book-pagination.patch || true &&
+	# CJK topic links: without this the dialogue topic list is empty for Chinese,
+	# because no keyword inside a spaceless CJK sentence is ever recognised as a
+	# link, so the player can never learn a topic. Verified post-build.
+	patch -d <SOURCE_DIR> -p1 -t -N < ${CMAKE_SOURCE_DIR}/openmw/patches/openmw/cjk-topic-links.patch || true
 )
 
 if(OPENMW_SRC)

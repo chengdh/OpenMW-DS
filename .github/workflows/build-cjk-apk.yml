@@ -147,6 +147,16 @@ jobs:
             exit 1
           fi
           echo "COMPANION COMMAND PUMP WIRED"
+          # cjk-topic-links.patch: with the stock keyword search no topic name inside
+          # a spaceless CJK sentence is ever recognised as a link, so the player can
+          # never learn a topic and the dialogue list ends up empty.
+          KS=$(find -L "$CXX_SRC" -name keywordsearch.cpp -path "*mwdialogue*" 2>/dev/null | head -1)
+          echo "keyword search source: ${KS:-<not found>}"
+          if [ -z "$KS" ] || ! grep -q "precededByWideChar" "$KS"; then
+            echo "::error::cjk-topic-links.patch did not apply - no CJK topic in dialogue text can be clicked, so the topic list stays empty"
+            exit 1
+          fi
+          echo "CJK TOPIC LINKS APPLIED"
           ls -la /mnt/work/build/generated_assets/libopenmw 2>/dev/null | head
           echo "generated engine assets: $(find /mnt/work/build/generated_assets -type f 2>/dev/null | wc -l) files"
           df -h /
